@@ -1,8 +1,8 @@
 # dockhook
 
-A lightweight Docker webhook service written in Go. Send a POST request to trigger a `docker pull` + container recreation for a configured image, then receive a Slack notification with the result.
-
 ![DockHook](dockhook-banner.png)
+
+A lightweight Docker webhook service written in Go. Send a POST request to trigger a `docker pull` + container recreation for a configured image, then receive a Slack notification with the result.
 
 ## How it works
 
