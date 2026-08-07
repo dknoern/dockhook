@@ -95,9 +95,19 @@ func deploy() {
 	}
 	log.Printf("pull complete: %s", cfg.Image)
 
-	var updated, failed []string
+	newImageID, err := getImageID(ctx, cfg.Image)
+	if err != nil {
+		log.Printf("warning: could not get image ID, skipping hash check: %v", err)
+	}
+
+	var updated, skipped, failed []string
 	for _, c := range targets {
 		name := containerName(c)
+		if newImageID != "" && c.ImageID == newImageID {
+			log.Printf("container %s already running latest image, skipping", name)
+			skipped = append(skipped, name)
+			continue
+		}
 		log.Printf("recreating %s (%s)", name, c.ID[:12])
 		if err := recreate(ctx, c.ID); err != nil {
 			log.Printf("recreate %s: %v", name, err)
@@ -107,19 +117,27 @@ func deploy() {
 		}
 	}
 
-	if len(failed) > 0 {
-		notify(false, fmt.Sprintf("%s: updated %v, failed %v", cfg.Image, updated, failed))
-	} else {
-		notify(true, fmt.Sprintf("updated %s, restarted: %s", cfg.Image, strings.Join(updated, ", ")))
+	switch {
+	case len(failed) > 0:
+		notify(false, fmt.Sprintf("%s: updated %v, skipped %v, failed %v", cfg.Image, updated, skipped, failed))
+	case len(updated) == 0:
+		notify(true, fmt.Sprintf("%s: all containers already up to date (%s)", cfg.Image, strings.Join(skipped, ", ")))
+	default:
+		msg := fmt.Sprintf("updated %s, restarted: %s", cfg.Image, strings.Join(updated, ", "))
+		if len(skipped) > 0 {
+			msg += fmt.Sprintf(", already current: %s", strings.Join(skipped, ", "))
+		}
+		notify(true, msg)
 	}
 }
 
 // ---- Docker REST API types (minimal) ----
 
 type containerSummary struct {
-	ID    string   `json:"Id"`
-	Names []string `json:"Names"`
-	Image string   `json:"Image"`
+	ID      string   `json:"Id"`
+	Names   []string `json:"Names"`
+	Image   string   `json:"Image"`
+	ImageID string   `json:"ImageID"` // SHA256 of the image the container is currently running
 }
 
 type containerDetail struct {
@@ -170,6 +188,20 @@ func pullImage(ctx context.Context, imageName string) error {
 		return fmt.Errorf("status %d: %s", resp.StatusCode, body)
 	}
 	return nil
+}
+
+func getImageID(ctx context.Context, imageName string) (string, error) {
+	data, status, err := dockerCall(ctx, "GET", "/images/"+imageName+"/json", nil, "")
+	if err != nil {
+		return "", err
+	}
+	if status != 200 {
+		return "", fmt.Errorf("status %d: %s", status, data)
+	}
+	var img struct {
+		ID string `json:"Id"`
+	}
+	return img.ID, json.Unmarshal(data, &img)
 }
 
 func inspectContainer(ctx context.Context, id string) (*containerDetail, error) {
