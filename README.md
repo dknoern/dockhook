@@ -106,6 +106,55 @@ git push origin v1.0.0
 
 This produces `dknoern/dockhook:v1.0.0` and `dknoern/dockhook:latest` (multi-arch: amd64 + arm64).
 
+## Triggering dockhook from your app's GitHub Action
+
+After your CI pipeline builds and pushes a new image, add a final step that calls your dockhook endpoint. Store the URL and secret as repository secrets so they aren't exposed in the workflow file.
+
+**Add these secrets to your app's repo** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_WEBHOOK_URL` | `http://your-host:8080/webhook` |
+| `DEPLOY_WEBHOOK_SECRET` | The same value as `DOCKHOOK_SECRET` on your server |
+
+**Add a deploy step at the end of your build workflow:**
+
+```yaml
+# .github/workflows/build.yml (in your app's repo)
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: yourname/myapp:latest
+
+      - name: Trigger deploy via dockhook
+        run: |
+          curl -f -X POST "${{ secrets.DEPLOY_WEBHOOK_URL }}" \
+            -H "X-Webhook-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}"
+```
+
+The `-f` flag makes `curl` exit with a non-zero status if dockhook returns an error (e.g. wrong secret), which will fail the workflow step. The actual pull and restart happen asynchronously on your server after the 202 response — check Slack or the server logs to confirm the deploy completed.
+
+**If your server isn't publicly reachable** (e.g. behind a firewall), you can use a tunnel like [Tailscale](https://tailscale.com) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to expose the endpoint, or trigger the webhook from a self-hosted GitHub Actions runner on the same network.
+
 ## Building locally
 
 dockhook has no external dependencies — it communicates with Docker via the REST API over the Unix socket using only the Go standard library.
@@ -127,4 +176,3 @@ docker build -t dockhook .
 - Use a long random secret: `openssl rand -hex 32`.
 - Place dockhook behind a reverse proxy with TLS in production.
 - The secret comparison uses `crypto/subtle.ConstantTimeCompare` to prevent timing attacks.
-# dockhook

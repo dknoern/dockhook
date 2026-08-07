@@ -17,7 +17,7 @@ import (
 
 const (
 	dockerSock = "/var/run/docker.sock"
-	apiBase    = "http://docker/v1.41"
+	apiBase    = "http://docker" // no version prefix — uses daemon's native API version
 )
 
 type appConfig struct {
@@ -139,7 +139,7 @@ func listContainersForImage(ctx context.Context, imageName string) ([]containerS
 		return nil, err
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("unexpected status %d", status)
+		return nil, fmt.Errorf("status %d: %s", status, data)
 	}
 	var all []containerSummary
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -165,9 +165,9 @@ func pullImage(ctx context.Context, imageName string) error {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, body)
 	}
 	return nil
 }
@@ -178,30 +178,30 @@ func inspectContainer(ctx context.Context, id string) (*containerDetail, error) 
 		return nil, err
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("unexpected status %d: %s", status, data)
+		return nil, fmt.Errorf("status %d: %s", status, data)
 	}
 	var detail containerDetail
 	return &detail, json.Unmarshal(data, &detail)
 }
 
 func stopContainer(ctx context.Context, id string) error {
-	_, status, err := dockerCall(ctx, "POST", "/containers/"+id+"/stop?t=10", nil, "")
+	data, status, err := dockerCall(ctx, "POST", "/containers/"+id+"/stop?t=10", nil, "")
 	if err != nil {
 		return err
 	}
 	if status != 204 && status != 304 {
-		return fmt.Errorf("unexpected status %d", status)
+		return fmt.Errorf("status %d: %s", status, data)
 	}
 	return nil
 }
 
 func removeContainer(ctx context.Context, id string) error {
-	_, status, err := dockerCall(ctx, "DELETE", "/containers/"+id, nil, "")
+	data, status, err := dockerCall(ctx, "DELETE", "/containers/"+id, nil, "")
 	if err != nil {
 		return err
 	}
 	if status != 204 {
-		return fmt.Errorf("unexpected status %d", status)
+		return fmt.Errorf("status %d: %s", status, data)
 	}
 	return nil
 }
@@ -222,12 +222,12 @@ func createContainer(ctx context.Context, name string, body []byte) (string, err
 }
 
 func startContainer(ctx context.Context, id string) error {
-	_, status, err := dockerCall(ctx, "POST", "/containers/"+id+"/start", nil, "")
+	data, status, err := dockerCall(ctx, "POST", "/containers/"+id+"/start", nil, "")
 	if err != nil {
 		return err
 	}
 	if status != 204 && status != 304 {
-		return fmt.Errorf("unexpected status %d", status)
+		return fmt.Errorf("status %d: %s", status, data)
 	}
 	return nil
 }
@@ -237,13 +237,13 @@ func connectNetwork(ctx context.Context, network, containerID string, ep json.Ra
 		"Container":      containerID,
 		"EndpointConfig": ep,
 	})
-	_, status, err := dockerCall(ctx, "POST", "/networks/"+network+"/connect",
+	data, status, err := dockerCall(ctx, "POST", "/networks/"+network+"/connect",
 		bytes.NewReader(body), "application/json")
 	if err != nil {
 		return err
 	}
 	if status != 200 {
-		return fmt.Errorf("unexpected status %d", status)
+		return fmt.Errorf("status %d: %s", status, data)
 	}
 	return nil
 }
